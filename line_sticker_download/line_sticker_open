@@ -1,0 +1,56 @@
+import requests, os, json
+from bs4 import BeautifulSoup
+
+#用with open 下載
+
+folderPath = 'line_stickers'
+# os.makedirs(..., exist_ok=True)：如果資料夾不存在就建立，已存在則不會拋錯。
+os.makedirs(folderPath, exist_ok=True)
+
+url = 'https://store.line.me/stickershop/product/17555/zh-Hant'
+headers = {'user-agent':'Mozilla/5.0'}
+
+res = requests.get(url, headers=headers)
+print("狀態碼：", res.status_code)
+
+soup = BeautifulSoup(res.text, 'lxml')
+# 改用 data-preview 屬性抓 li
+# 篩選出所有帶有 data-preview 屬性的 <li> 標籤”
+#
+li_list = soup.find_all("li", attrs={"data-preview":True})
+print("貼圖預覽數量：", len(li_list))
+
+'''
+li_list = []  
+for li in soup.find_all("li"):
+    # 如果這個 <li> 有 data-preview 屬性，就加入 li_list
+    if li.has_attr("data-preview"):
+        li_list.append(li)
+
+print("貼圖預覽數量：", len(li_list))
+'''
+
+
+stickers = []
+for li in li_list:
+    info = json.loads(li["data-preview"])  #傳入的「JSON 格式字串」解析（deserialize）成對應的 Python 資料結構（通常是 dict 或 list）。
+    stickers.append({
+        "id": info["id"],
+        "url": info["staticUrl"]
+    })
+
+for s in stickers:
+    #告訴 requests：「先別急著把全部內容載下來，等我透過 iter_content() 或 raw 去讀的時候，再分批次（chunk-by-chunk）下載。」
+    #stream=False（預設） → 立刻下載整個回應。
+    #stream=True → 延後、分段下載，用 .iter_content() 或 .raw 讀取時才下載，適合大檔案。
+
+    img_res = requests.get(s["url"], stream=True)
+    if img_res.status_code == 200:
+        path = os.path.join(folderPath, f"{s['id']}.png")
+        with open(path, "wb") as f:
+            for chunk in img_res.iter_content(1024): 
+                f.write(chunk)
+           
+        print("下載完成：", path)
+    else:
+        print("下載失敗：", s["url"])
