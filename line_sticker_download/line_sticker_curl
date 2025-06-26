@@ -1,66 +1,89 @@
-import requests, pprint, os, json
+import os
+import json
+import requests
 from bs4 import BeautifulSoup
 
-#下載LINE貼圖(最後用CURL下載)
-# 建立儲存圖片的資料夾，不存在就新增
-folderPath = './line_stickers'
-if not os.path.exists(folderPath):
-    os.makedirs(folderPath)
-    
-#放貼圖資訊用
-listLineStickers = []
+# 下載LINE貼圖(最後用CURL下載)
 
-# 自訂標頭
-my_headers = {
-    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36'
+FOLDER_PATH = './line_stickers'
+URL         = 'https://store.line.me/stickershop/product/17555/zh-Hant'
+HEADERS     = {
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                  'AppleWebKit/537.36 (KHTML, like Gecko) '
+                  'Chrome/135.0.0.0 Safari/537.36'
 }
 
-# 官方 LINE 貼圖的網址
-url = 'https://store.line.me/stickershop/product/17555/zh-Hant'
+def prepare_folder(path):
+    """建立資料夾（若不存在則新增）"""
+    try:
+        os.makedirs(path, exist_ok=True)
+        print(f"✅ 資料夾 {path} 就緒")
+    except Exception as e:
+        print(f"❌ 建立資料夾失敗：{e}")
+        raise
 
-# 將自訂標頭加入 GET 請求中
-response = requests.get(url, headers = my_headers)
+def fetch_page(url, headers):
+    """下載網頁，回傳 HTML 文字"""
+    try:
+        resp = requests.get(url, headers=headers)
+        resp.raise_for_status()
+        print(f"✅ 網頁取得成功，狀態碼 {resp.status_code}")
+        return resp.text
+    except Exception as e:
+        print(f"❌ 取得網頁失敗：{e}")
+        raise
 
-# 檢查狀態
-#print(response.status_code)
-    
+def parse_li_elements(html):
+    """解析 HTML，回傳所有帶 data-preview 的 <li> 列表"""
+    try:
+        soup = BeautifulSoup(html, 'lxml')
+        li_list = soup.find_all("li", attrs={"data-preview": True})
+        print(f"✅ 找到 {len(li_list)} 個貼圖預覽元素")
+        return li_list
+    except Exception as e:
+        print(f"❌ 解析貼圖列表失敗：{e}")
+        raise
 
-# 建立 soup 物件
-soup = BeautifulSoup(response.text, 'lxml')
+def extract_stickers(li_list):
+    """從 <li> 元素中擷取貼圖 id 和下載連結"""
+    stickers = []
+    for li in li_list:
+        try:
+            info = json.loads(li["data-preview"])
+            stickers.append({"id": info["id"], "url": info["staticUrl"]})
+        except Exception as e:
+            print(f"⚠️ 擷取貼圖資訊失敗：{e}")
+            continue
+    print(f"✅ 共解析出 {len(stickers)} 張貼圖")
+    return stickers
 
-'''
-備註:
-1. soup.select()：回傳的結果是元素集合（list 型態，BeautifulSoup ResultSet）
-2. soup.select_one()：回傳的結果是單一元素（BeautifulSoup Result）
-'''
-# 取得放置貼圖的 li 元素 (list 型態)
-li_elements = soup.select("ul.mdCMN09Ul.FnStickerList > li.mdCMN09Li.FnStickerPreviewItem")
+def download_stickers_with_curl(stickers, folder):
+    """
+    使用 curl 逐張下載貼圖並儲存本機
+    -k 跳過 SSL 憑證驗證
+    -o <路徑> 指定檔名輸出
+    """
+    for s in stickers:
+        try:
+            dest = os.path.join(folder, f"{s['id']}.png")
+            cmd = f"curl -k {s['url']} -o {dest}"
+            ret = os.system(cmd)
+            if ret != 0:
+                raise RuntimeError(f"curl 回傳值 {ret}")
+            print(f"✅ 貼圖 {s['id']} 下載完成：{dest}")
+        except Exception as e:
+            print(f"❌ 貼圖 {s['id']} 下載失敗：{e}")
+            continue
 
+def main():
+    prepare_folder(FOLDER_PATH)
+    html       = fetch_page(URL, HEADERS)
+    li_list    = parse_li_elements(html)
+    stickers   = extract_stickers(li_list)
+    download_stickers_with_curl(stickers, FOLDER_PATH)
 
-# 逐一取得 li 元素中的 data-preview 資訊
-for li in li_elements:
-    # 取得 data-preview 屬性的值(字串)
-    strJson = li['data-preview'] # 另一種寫法：li.get("data-preview")
-    
-    #把屬性的值(字串)轉成物件 
-    obj = json.loads(strJson)
-    
-    # 將重要資訊放置在 list 當中，幫助我們稍候進行資料下載與儲存
-    listLineStickers.append({
-        "id": obj['id'],
-        "link": obj['staticUrl']
-    })
-    
-    #全部資訊都存
-    # listLineStickers.append(obj)
-    
-    
-#print(listLineStickers)    
-
-# 下載圖片
-# curl（Client URL）命令列工具，用來向各種網路服務發送請求並下載或上傳資料。
-# -o <檔名>：將回應內容存成指定檔名
-# -k --insecure：跳過 SSL 憑證驗證
-for obj in listLineStickers: 
-    os.system(f"curl -k {obj['link']} -o {folderPath}/{obj['id']}.png")
-    print(f"貼圖ID: {obj['id']}, 下載連結: {obj['link']}")
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as e:
+        print(f"[FATAL] 程式異常結束：{e}")
