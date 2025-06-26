@@ -1,56 +1,84 @@
-import requests, os, json
+import os
+import json
+import requests
 from bs4 import BeautifulSoup
-
 #用with open 下載
 
-folderPath = 'line_stickers'
-# os.makedirs(..., exist_ok=True)：如果資料夾不存在就建立，已存在則不會拋錯。
-os.makedirs(folderPath, exist_ok=True)
+FOLDER_PATH = 'line_stickers'
+URL         = 'https://store.line.me/stickershop/product/17555/zh-Hant'
+HEADERS     = {'user-agent': 'Mozilla/5.0'}
 
-url = 'https://store.line.me/stickershop/product/17555/zh-Hant'
-headers = {'user-agent':'Mozilla/5.0'}
+def prepare_folder(path):
+    """建立資料夾（若已存在不錯誤）"""
+    try:
+        os.makedirs(path, exist_ok=True)
+        print(f"✅ 資料夾 {path} 準備完成")
+    except Exception as e:
+        print(f"❌ 建立資料夾失敗：{e}")
+        raise
 
-res = requests.get(url, headers=headers)
-print("狀態碼：", res.status_code)
+def fetch_page(url, headers):
+    """下載網頁並檢查狀態碼"""
+    try:
+        res = requests.get(url, headers=headers)
+        res.raise_for_status()
+        print(f"✅ 網頁取得成功，狀態碼 {res.status_code}")
+        return res.text
+    except Exception as e:
+        print(f"❌ 取得網頁失敗：{e}")
+        raise
 
-soup = BeautifulSoup(res.text, 'lxml')
-# 改用 data-preview 屬性抓 li
-# 篩選出所有帶有 data-preview 屬性的 <li> 標籤”
-#
-li_list = soup.find_all("li", attrs={"data-preview":True})
-print("貼圖預覽數量：", len(li_list))
+def parse_li_list(html):
+    """從 HTML 找出所有帶 data-preview 的 <li>"""
+    try:
+        soup = BeautifulSoup(html, 'lxml')
+        li_list = soup.find_all("li", attrs={"data-preview": True})
+        print(f"✅ 找到 {len(li_list)} 個貼圖預覽")
+        return li_list
+    except Exception as e:
+        print(f"❌ 解析 HTML 失敗：{e}")
+        raise
 
-'''
-li_list = []  
-for li in soup.find_all("li"):
-    # 如果這個 <li> 有 data-preview 屬性，就加入 li_list
-    if li.has_attr("data-preview"):
-        li_list.append(li)
+def extract_stickers(li_list):
+    """從 data-preview 屬性取出每張貼圖的 id 與 url"""
+    stickers = []
+    for li in li_list:
+        try:
+            info = json.loads(li["data-preview"])
+            stickers.append({
+                "id":  info["id"],
+                "url": info["staticUrl"]
+            })
+        except Exception as e:
+            print(f"⚠️ 解析貼圖資料失敗：{e}")
+            continue
+    print(f"✅ 共解析 {len(stickers)} 張貼圖")
+    return stickers
 
-print("貼圖預覽數量：", len(li_list))
-'''
+def download_stickers(stickers, folder):
+    """下載每張貼圖並存檔"""
+    for s in stickers:
+        try:
+            r = requests.get(s["url"], stream=True)
+            r.raise_for_status()
+            path = os.path.join(folder, f"{s['id']}.png")
+            with open(path, "wb") as f:
+                for chunk in r.iter_content(1024):
+                    f.write(chunk)
+            print(f"✅ 下載完成：{path}")
+        except Exception as e:
+            print(f"❌ 貼圖 {s['id']} 下載失敗：{e}")
+            continue
 
+def main():
+    prepare_folder(FOLDER_PATH)
+    html     = fetch_page(URL, HEADERS)
+    li_list  = parse_li_list(html)
+    stickers = extract_stickers(li_list)
+    download_stickers(stickers, FOLDER_PATH)
 
-stickers = []
-for li in li_list:
-    info = json.loads(li["data-preview"])  #傳入的「JSON 格式字串」解析（deserialize）成對應的 Python 資料結構（通常是 dict 或 list）。
-    stickers.append({
-        "id": info["id"],
-        "url": info["staticUrl"]
-    })
-
-for s in stickers:
-    #告訴 requests：「先別急著把全部內容載下來，等我透過 iter_content() 或 raw 去讀的時候，再分批次（chunk-by-chunk）下載。」
-    #stream=False（預設） → 立刻下載整個回應。
-    #stream=True → 延後、分段下載，用 .iter_content() 或 .raw 讀取時才下載，適合大檔案。
-
-    img_res = requests.get(s["url"], stream=True)
-    if img_res.status_code == 200:
-        path = os.path.join(folderPath, f"{s['id']}.png")
-        with open(path, "wb") as f:
-            for chunk in img_res.iter_content(1024): 
-                f.write(chunk)
-           
-        print("下載完成：", path)
-    else:
-        print("下載失敗：", s["url"])
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as e:
+        print(f"[FATAL] 程式異常結束：{e}")
