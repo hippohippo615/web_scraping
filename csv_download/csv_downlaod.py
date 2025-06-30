@@ -1,155 +1,136 @@
-'''
-臺灣證券交易所
-外資及陸資買賣超彙總表
-https://www.twse.com.tw/zh/page/trading/fund/TWT38U.html
-'''
-
-'''
-匯入套件
-'''
-# 操作 browser 的 API
+import os
+from datetime import datetime
+from time import sleep
 from selenium import webdriver
-
-# 處理逾時例外的工具
-from selenium.common.exceptions import TimeoutException
-
-# 面對動態網頁，等待某個元素出現的工具，通常與 exptected_conditions 搭配
-from selenium.webdriver.support.ui import WebDriverWait
-
-# 搭配 WebDriverWait 使用，對元素狀態的一種期待條件，若條件發生，則等待結束，往下一行執行
+from selenium.common.exceptions import TimeoutException, WebDriverException, NoSuchElementException
+from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
-
-# 期待元素出現要透過什麼方式指定，通常與 EC、WebDriverWait 一起使用
 from selenium.webdriver.common.by import By
 
-# 處理下拉式選單的工具
-from selenium.webdriver.support.ui import Select
-
-# 取得系統時間的工具
-from datetime import datetime
-
-# 強制等待 (執行期間休息一下)
-from time import sleep
-
-# 整理 json 使用的工具
-import json
-
-# 執行 command 的時候用的
-import os
-
-'''
-[1] Selenium with Python 中文翻譯文檔
-參考網頁：https://selenium-python-zh.readthedocs.io/en/latest/index.html
-[2] selenium 啓動 Chrome 的進階配置參數
-參考網址：https://stackoverflow.max-everyday.com/2019/12/selenium-chrome-options/
-[3] Mouse Hover Action in Selenium
-參考網址：https://www.toolsqa.com/selenium-webdriver/mouse-hover-action/
-[4] How to select a drop-down menu value with Selenium using Python?
-參考網址：https://stackoverflow.com/questions/7867537/how-to-select-a-drop-down-menu-value-with-selenium-using-python
-'''
-
-# 啟動瀏覽器工具的選項
-options = webdriver.ChromeOptions()
-# options.add_argument("--headless")                #不開啟實體瀏覽器背景執行
-options.add_argument("--start-maximized")         #最大化視窗
-options.add_argument("--incognito")               #開啟無痕模式
-options.add_argument("--disable-popup-blocking") #禁用彈出攔截
-options.add_argument("--disable-notifications")   #取消通知
-
-# 建立儲存圖片的資料夾，不存在就新增
+# --------------------
+# 全局設定
+# --------------------
+# 下載資料夾
+#可以讓程式在資料夾已存在時不會拋出錯誤，而是直接跳過建立步驟，提升容錯能力。
 folderPath = 'files'
 if not os.path.exists(folderPath):
-    os.makedirs(folderPath)
+    os.makedirs(folderPath, exist_ok=True)
+# 轉成絕對路徑
+download_path = os.path.abspath(folderPath)
 
-# 下載路徑 (請先在專案目錄下，建立一個新資料夾 files)
-download_path = 'C:\\Users\\Liu\\python爬蟲\\cases\\files'
+# Selenium Options
+options = webdriver.ChromeOptions()
+options.add_argument("--start-maximized")
+options.add_argument("--incognito")
+options.add_argument("--disable-popup-blocking")
+options.add_argument("--disable-notifications")
+options.add_argument("--lang=zh-TW")
+# 設置 prefs
+prefs = {
+    "download.prompt_for_download": False,
+    "profile.default_content_settings.popups": 0,
+    "download.default_directory": download_path,
+    "download.directory_upgrade": True,
+    "safebrowsing.enabled": True,
+}
+options.add_experimental_option("prefs", prefs)
 
-#預設下載路徑
-options.add_experimental_option("prefs", {
-  "download.default_directory": download_path 
-})
+# 啟動 WebDriver
+try:
+    from selenium.webdriver.chrome.service import Service
+    service = Service(executable_path='./chromedriver.exe')
+    driver = webdriver.Chrome(service=service, options=options)
+    # 強制使用 CDP 指定下載行為
+    driver.execute_cdp_cmd(
+        "Page.setDownloadBehavior", {
+            "behavior": "allow",
+            "downloadPath": download_path
+        }
+    )
+    print("✅ Chrome 截圖及下載實例啟動成功")
+except WebDriverException as e:
+    print(f"❌ 無法啟動 ChromeDriver：{e}")
+    raise SystemExit("程式終止")
 
-# 指定 chromedriver 檔案的路徑
-executable_path = './chromedriver.exe'
-
-# 使用 Chrome 的 WebDriver (options 以及 executable_path)
-driver = webdriver.Chrome( 
-    options = options, 
-    executable_path = executable_path
-)
-
-# 走訪頁面
+# --------------------
+# 功能函式
+# --------------------
 def visit():
-    driver.get('https://www.twse.com.tw/zh/page/trading/fund/TWT38U.html');
-
-# 選取下拉式選單的項目
-def setDropDownMenu():
-    # 強制停止
-    sleep(1)
-    
-    # 選擇 select[name="YY"] 元素，並依 option 的 innerText 來進行選取
-    selectYY = Select(driver.find_element(By.CSS_SELECTOR, 'div#d1 > select[name="yy"]'))
-    selectYY.select_by_visible_text('民國 100 年')
-    
-    # 強制停止
-    sleep(1)
-    
-    # 選擇 select[name="MM"] 元素，並依 option 的 value 來進行選取
-    selectMM = Select(driver.find_element(By.CSS_SELECTOR, 'div#d1 > select[name="mm"]'))
-    selectMM.select_by_value('2')
-    
-    # 強制停止
-    sleep(1)
-    
-    # 選擇 select[name="DD"] 元素，並依 option 的 index 來進行選取
-    selectDD = Select(driver.find_element(By.CSS_SELECTOR, 'div#d1 > select[name="dd"]'))
-    selectDD.select_by_index(8)
-    
-    # 強制停止
-    sleep(1)
-    
-    # 按下查詢
-    driver.find_element(By.CSS_SELECTOR, 'a.button.search').click()
-    
-    # 強制停止
-    sleep(2)
-    
-# 下載檔案
-def download():
+    """開啟 TWSE 外資買賣超頁面"""
     try:
-        # 等待篩選元素出現
+        driver.get('https://www.twse.com.tw/zh/page/trading/fund/TWT38U.html')
+        print("✅ 開啟主頁成功")
+    except Exception as e:
+        print(f"❌ visit() 階段錯誤：{e}")
+        raise
+
+
+def set_drop_down_menu():
+    """選擇年月日並執行查詢"""
+    try:
+        sleep(1)
+        # 年
+        sel_yy = Select(WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, 'div.panel.label5 select#label0'))
+        ))
+        sel_yy.select_by_value('2011')
+        sleep(1)
+        # 月
+        sel_mm = Select(driver.find_element(By.CSS_SELECTOR, 'div.panel.label5 select[name="mm"]'))
+        sel_mm.select_by_visible_text('02月')
+        sleep(1)
+        # 日
+        sel_dd = Select(driver.find_element(By.CSS_SELECTOR, 'div.panel.label5 select[name="dd"]'))
+        sel_dd.select_by_index(8)
+        sleep(1)
+        # 查詢
+        driver.find_element(By.CSS_SELECTOR, 'div.submit button.search').click()
+        print("✅ 查詢參數設定完成並執行查詢")
+        sleep(2)
+    except (NoSuchElementException, TimeoutException) as e:
+        print(f"❌ set_drop_down_menu() 階段錯誤：{e}")
+        raise
+
+
+def download_csv():
+    """等待 CSV 按鈕出現後點擊下載並截圖"""
+    try:
         WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located( 
-                (By.CSS_SELECTOR, "div.tools > a.csv") 
-            )
+            EC.presence_of_element_located((By.CSS_SELECTOR, 'div.rwd-tools button.csv'))
         )
-        
-        # 下載
-        driver.find_element(By.CSS_SELECTOR, "div.tools > a.csv").click()
-        
-        # 強制停止
+        driver.find_element(By.CSS_SELECTOR, 'div.rwd-tools button.csv').click()
+        print("✅ 已點擊下載 CSV 按鈕")
         sleep(2)
-        
-        # 找出現在時間 (年月日時分秒)
-        strDataTime = datetime.today().strftime("%Y%m%d%H%M%S")
-        
-        # 擷圖
-        driver.save_screenshot(f"./files/{strDataTime}.png");
-        
-        # 強制停止
-        sleep(2)
+
+        # 擷取畫面
+        ts = datetime.today().strftime('%Y%m%d%H%M%S')
+        shot_path = os.path.join(folderPath, f'{ts}.png')
+        driver.save_screenshot(shot_path)
+        print(f"✅ 已截圖並儲存：{shot_path}")
     except TimeoutException:
-        print("等待逾時，即將關閉瀏覽器…")
-        sleep(3)
-        driver.quit()
+        print("⚠️ download_csv() 等待超時：未找到 CSV 按鈕")
+    except Exception as e:
+        print(f"❌ download_csv() 階段錯誤：{e}")
 
-# 關閉瀏覽器
+
 def close():
-    driver.quit()
+    """關閉瀏覽器"""
+    try:
+        driver.quit()
+        print("✅ 瀏覽器已關閉")
+    except Exception as e:
+        print(f"⚠️ close() 階段錯誤：{e}")
 
+
+# --------------------
 # 主程式
+# --------------------
 if __name__ == '__main__':
-    visit()
-    setDropDownMenu()
-    download()
-    close()
+    try:
+        visit()
+        set_drop_down_menu()
+        download_csv()
+    except Exception:
+        print("[FATAL] 主流程異常，程式中止")
+    finally:
+        close()
